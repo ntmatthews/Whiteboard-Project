@@ -82,7 +82,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Zoom the viewport
     function zoomViewport(factor, centerX, centerY) {
         const oldScale = viewportScale;
-        viewportScale = Math.min(Math.max(viewportScale * factor, 0.1), 10);
+        
+        // Remove upper limit for infinite zoom, keep a minimum to prevent zoom to zero
+        // Exponential scaling gives smoother zoom experience at extreme levels
+        viewportScale = Math.max(viewportScale * factor, 0.000001);
         
         // Adjust viewport position to zoom toward the center point
         if (centerX !== undefined && centerY !== undefined) {
@@ -94,10 +97,27 @@ document.addEventListener('DOMContentLoaded', () => {
             viewportY -= (afterY - beforeY * oldScale);
         }
         
-        // Update zoom display
-        zoomDisplay.textContent = `${Math.round(viewportScale * 100)}%`;
+        // Update zoom display with appropriate formatting for extreme values
+        updateZoomDisplay();
         
         render();
+    }
+
+    // Update zoom display with appropriate formatting
+    function updateZoomDisplay() {
+        let zoomPercentage = viewportScale * 100;
+        
+        if (zoomPercentage >= 10000) {
+            zoomDisplay.textContent = `${Math.round(zoomPercentage / 1000)}k%`;
+        } else if (zoomPercentage >= 1000) {
+            zoomDisplay.textContent = `${(zoomPercentage / 1000).toFixed(1)}k%`;
+        } else if (zoomPercentage < 1) {
+            zoomDisplay.textContent = `${zoomPercentage.toFixed(2)}%`;
+        } else if (zoomPercentage < 10) {
+            zoomDisplay.textContent = `${zoomPercentage.toFixed(1)}%`;
+        } else {
+            zoomDisplay.textContent = `${Math.round(zoomPercentage)}%`;
+        }
     }
 
     // Fit content to view
@@ -136,7 +156,7 @@ document.addEventListener('DOMContentLoaded', () => {
         viewportY = canvas.height / 2 - (minY + contentHeight / 2) * viewportScale;
         
         // Update zoom display
-        zoomDisplay.textContent = `${Math.round(viewportScale * 100)}%`;
+        updateZoomDisplay();
         
         render();
     }
@@ -146,38 +166,10 @@ document.addEventListener('DOMContentLoaded', () => {
         viewportScale = 1;
         viewportX = 0;
         viewportY = 0;
-        zoomDisplay.textContent = '100%';
+        updateZoomDisplay();
         render();
     }
 
-    // Initialize
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
-
-    // Update stroke width display
-    strokeWidth.addEventListener('input', () => {
-        lineWidth = parseInt(strokeWidth.value);
-        brushSizeDisplay.textContent = `${lineWidth}px`;
-    });
-
-    // Update stroke color
-    strokeColorPicker.addEventListener('input', () => {
-        strokeColor = strokeColorPicker.value;
-        if (selectedObject) {
-            selectedObject.strokeColor = strokeColor;
-            render();
-        }
-    });
-    
-    // Update fill color
-    fillColorPicker.addEventListener('input', () => {
-        fillColor = fillColorPicker.value;
-        if (selectedObject) {
-            selectedObject.fillColor = fillColor;
-            render();
-        }
-    });
-    
     // Shape classes
     class Shape {
         constructor(type, strokeColor, fillColor, strokeWidth) {
@@ -203,16 +195,22 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const bounds = this.getBounds();
             ctx.strokeStyle = '#4285f4';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]);
+            
+            // Adjust line width and dash pattern based on zoom level
+            const inverseScale = 1 / viewportScale;
+            const lineWidth = Math.min(2 * inverseScale, 2);
+            const dashSize = Math.min(5 * inverseScale, 5);
+            
+            ctx.lineWidth = lineWidth;
+            ctx.setLineDash([dashSize, dashSize]);
             ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
             ctx.setLineDash([]);
             
-            // Draw handles
-            const handleSize = 8;
+            // Draw handles with appropriate size for zoom level
+            const handleSize = Math.min(8 * inverseScale, 8);
             ctx.fillStyle = 'white';
             ctx.strokeStyle = '#4285f4';
-            ctx.lineWidth = 1;
+            ctx.lineWidth = lineWidth * 0.5;
             
             // Corner handles
             [
@@ -464,8 +462,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // Apply viewport transformations
         applyViewportTransform();
         
-        // Draw all objects
+        // Draw grid at appropriate zoom levels for orientation
+        drawGrid();
+        
+        // Optimization: Only draw objects that are potentially in view
+        const visibleBounds = {
+            x: -viewportX / viewportScale,
+            y: -viewportY / viewportScale,
+            width: canvas.width / viewportScale,
+            height: canvas.height / viewportScale
+        };
+        
         objects.forEach(obj => {
+            // Skip rendering objects that are completely outside the viewport
+            const objBounds = obj.getBounds();
+            if (objBounds.x > visibleBounds.x + visibleBounds.width ||
+                objBounds.y > visibleBounds.y + visibleBounds.height ||
+                objBounds.x + objBounds.width < visibleBounds.x ||
+                objBounds.y + objBounds.height < visibleBounds.y) {
+                return;
+            }
+            
             obj.draw(ctx);
         });
         
@@ -481,35 +498,105 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Restore context
         restoreViewport();
+        
+        // Draw zoom indicator when extremely zoomed in or out
+        drawZoomIndicator();
     }
-    
-    // Handle tool selection
-    function selectActiveTool(tool) {
-        selectedTool = tool;
-        
-        // Update UI
-        [selectTool, pathTool, lineTool, rectTool, ellipseTool].forEach(btn => {
-            btn.classList.remove('active');
-        });
-        
-        switch (tool) {
-            case 'select': selectTool.classList.add('active'); break;
-            case 'path': pathTool.classList.add('active'); break;
-            case 'line': lineTool.classList.add('active'); break;
-            case 'rectangle': rectTool.classList.add('active'); break;
-            case 'ellipse': ellipseTool.classList.add('active'); break;
+
+    // Draw a grid to help with orientation at extreme zoom levels
+    function drawGrid() {
+        // Only draw grid when zoomed enough to be useful
+        if (viewportScale < 0.05 || viewportScale > 20) {
+            const gridSize = getAppropriateGridSize();
+            const xStart = Math.floor((-viewportX) / viewportScale / gridSize) * gridSize;
+            const yStart = Math.floor((-viewportY) / viewportScale / gridSize) * gridSize;
+            const xEnd = xStart + (canvas.width / viewportScale / gridSize + 2) * gridSize;
+            const yEnd = yStart + (canvas.height / viewportScale / gridSize + 2) * gridSize;
+            
+            ctx.strokeStyle = 'rgba(200, 200, 200, 0.2)';
+            ctx.lineWidth = 0.5 / viewportScale;
+            
+            // Draw vertical lines
+            for (let x = xStart; x <= xEnd; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, yStart);
+                ctx.lineTo(x, yEnd);
+                ctx.stroke();
+            }
+            
+            // Draw horizontal lines
+            for (let y = yStart; y <= yEnd; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(xStart, y);
+                ctx.lineTo(xEnd, y);
+                ctx.stroke();
+            }
         }
-        
-        // Update cursor
-        canvas.className = `cursor-${tool}`;
-        
-        // Deselect when switching tools
+    }
+
+    // Determine appropriate grid size based on zoom level
+    function getAppropriateGridSize() {
+        if (viewportScale < 0.001) return 10000;
+        if (viewportScale < 0.01) return 1000;
+        if (viewportScale < 0.1) return 100;
+        if (viewportScale < 1) return 50;
+        if (viewportScale > 100) return 0.1;
+        if (viewportScale > 50) return 0.2;
+        if (viewportScale > 20) return 0.5;
+        if (viewportScale > 10) return 1;
+        return 10;
+    }
+
+    // Draw zoom indicator to show current state
+    function drawZoomIndicator() {
+        // Only show indicator at extreme zoom levels
+        if (viewportScale > 20 || viewportScale < 0.1) {
+            const padding = 10;
+            const width = 150;
+            const height = 30;
+            const x = canvas.width - width - padding;
+            const y = canvas.height - height - padding;
+            
+            // Draw background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(x, y, width, height);
+            
+            // Display zoom level
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`Zoom: ${zoomDisplay.textContent}`, x + width/2, y + height/2);
+        }
+    }
+
+    // Initialize
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Update stroke width display
+    strokeWidth.addEventListener('input', () => {
+        lineWidth = parseInt(strokeWidth.value);
+        brushSizeDisplay.textContent = `${lineWidth}px`;
+    });
+
+    // Update stroke color
+    strokeColorPicker.addEventListener('input', () => {
+        strokeColor = strokeColorPicker.value;
         if (selectedObject) {
-            selectedObject.isSelected = false;
-            selectedObject = null;
+            selectedObject.strokeColor = strokeColor;
             render();
         }
-    }
+    });
+    
+    // Update fill color
+    fillColorPicker.addEventListener('input', () => {
+        fillColor = fillColorPicker.value;
+        if (selectedObject) {
+            selectedObject.fillColor = fillColor;
+            render();
+        }
+    });
     
     // Tool button events
     selectTool.addEventListener('click', () => selectActiveTool('select'));
@@ -765,7 +852,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
         
-        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        // Adjust scaling factor based on current zoom for smoother experience
+        // For extreme zoom levels, use a more granular factor
+        let factor;
+        if (e.deltaY < 0) { // Zoom in
+            factor = viewportScale < 0.1 ? 1.05 : 1.1;
+        } else { // Zoom out
+            factor = viewportScale < 0.1 ? 0.95 : 0.9;
+        }
+        
         zoomViewport(factor, mouseX, mouseY);
     });
     
