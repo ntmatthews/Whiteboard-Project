@@ -25,6 +25,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const zoomFitButton = document.getElementById('zoom-fit-button');
     const zoomDisplay = document.getElementById('zoom-display');
     
+    // Grid control
+    const gridToggleButton = document.getElementById('grid-toggle-button');
+    let gridEnabled = false;
+    
     // Vector objects storage
     let objects = [];
     let selectedObject = null;
@@ -503,17 +507,21 @@ document.addEventListener('DOMContentLoaded', () => {
         drawZoomIndicator();
     }
 
-    // Draw a grid to help with orientation at extreme zoom levels
+    // Draw a grid to help with orientation and alignment
     function drawGrid() {
-        // Only draw grid when zoomed enough to be useful
-        if (viewportScale < 0.05 || viewportScale > 20) {
+        // Only draw grid when zoom level is appropriate or grid is explicitly enabled
+        if (gridEnabled || viewportScale < 0.05 || viewportScale > 20) {
             const gridSize = getAppropriateGridSize();
             const xStart = Math.floor((-viewportX) / viewportScale / gridSize) * gridSize;
             const yStart = Math.floor((-viewportY) / viewportScale / gridSize) * gridSize;
             const xEnd = xStart + (canvas.width / viewportScale / gridSize + 2) * gridSize;
             const yEnd = yStart + (canvas.height / viewportScale / gridSize + 2) * gridSize;
             
-            ctx.strokeStyle = 'rgba(200, 200, 200, 0.2)';
+            // Adjust grid opacity based on whether it's enabled or automatic
+            ctx.strokeStyle = gridEnabled ? 
+                'rgba(200, 200, 200, 0.4)' : 
+                'rgba(200, 200, 200, 0.2)';
+                
             ctx.lineWidth = 0.5 / viewportScale;
             
             // Draw vertical lines
@@ -570,6 +578,55 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Toggle grid visibility
+    function toggleGrid() {
+        gridEnabled = !gridEnabled;
+        gridToggleButton.classList.toggle('active', gridEnabled);
+        render();
+    }
+
+    // Handle tool selection
+    function selectActiveTool(tool) {
+        selectedTool = tool;
+        
+        // Update UI
+        selectTool.classList.remove('active');
+        pathTool.classList.remove('active');
+        lineTool.classList.remove('active');
+        rectTool.classList.remove('active');
+        ellipseTool.classList.remove('active');
+        
+        switch (tool) {
+            case 'select':
+                selectTool.classList.add('active');
+                canvas.className = 'cursor-select';
+                break;
+            case 'path':
+                pathTool.classList.add('active');
+                canvas.className = 'cursor-path';
+                break;
+            case 'line':
+                lineTool.classList.add('active');
+                canvas.className = 'cursor-line';
+                break;
+            case 'rectangle':
+                rectTool.classList.add('active');
+                canvas.className = 'cursor-rect';
+                break;
+            case 'ellipse':
+                ellipseTool.classList.add('active');
+                canvas.className = 'cursor-ellipse';
+                break;
+        }
+        
+        // Deselect when switching tools
+        if (selectedObject) {
+            selectedObject.isSelected = false;
+            selectedObject = null;
+            render();
+        }
+    }
+
     // Initialize
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
@@ -622,6 +679,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'l': selectActiveTool('line'); break;
             case 'r': selectActiveTool('rectangle'); break;
             case 'e': selectActiveTool('ellipse'); break;
+            case 'g': toggleGrid(); break; // Added grid toggle shortcut
             case 'delete': case 'backspace': 
                 if (selectedObject) {
                     const index = objects.findIndex(obj => obj.id === selectedObject.id);
@@ -1000,6 +1058,9 @@ document.addEventListener('DOMContentLoaded', () => {
     zoomOutButton.addEventListener('click', () => zoomViewport(0.9, canvas.width/2, canvas.height/2));
     zoomResetButton.addEventListener('click', resetViewport);
     zoomFitButton.addEventListener('click', fitContentToView);
+    
+    // Grid toggle button event
+    gridToggleButton.addEventListener('click', toggleGrid);
     
     // Initialize with path tool selected and reset viewport
     selectActiveTool('path');

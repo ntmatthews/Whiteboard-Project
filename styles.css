@@ -200,3 +200,15 @@ canvas {
 .cursor-precise {
     cursor: crosshair;
 }
+
+/* Grid toggle button when active */
+#grid-toggle-button.active {
+    background-color: #4285f4;
+    color: white;
+}
+
+/* Grid lines (can be customized further) */
+.grid-line {
+    stroke: rgba(200, 200, 200, 0.4);
+    stroke-width: 1;
+}
