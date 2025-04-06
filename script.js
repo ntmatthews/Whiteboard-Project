@@ -18,6 +18,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const rectTool = document.getElementById('rect-tool');
     const ellipseTool = document.getElementById('ellipse-tool');
     
+    // Zoom controls
+    const zoomInButton = document.getElementById('zoom-in-button');
+    const zoomOutButton = document.getElementById('zoom-out-button');
+    const zoomResetButton = document.getElementById('zoom-reset-button');
+    const zoomFitButton = document.getElementById('zoom-fit-button');
+    const zoomDisplay = document.getElementById('zoom-display');
+    
     // Vector objects storage
     let objects = [];
     let selectedObject = null;
@@ -35,6 +42,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Temporary shape for preview during drawing
     let tempShape = null;
     
+    // Viewport state
+    let viewportScale = 1;
+    let viewportX = 0;
+    let viewportY = 0;
+    let isDraggingViewport = false;
+    let lastPanPoint = { x: 0, y: 0 };
+    
     // Resize canvas to fill container
     function resizeCanvas() {
         const rect = canvas.parentElement.getBoundingClientRect();
@@ -42,6 +56,97 @@ document.addEventListener('DOMContentLoaded', () => {
         canvas.height = rect.height;
         
         // Redraw canvas after resize
+        render();
+    }
+
+    // Apply viewport transformations
+    function applyViewportTransform() {
+        ctx.save();
+        ctx.translate(viewportX, viewportY);
+        ctx.scale(viewportScale, viewportScale);
+    }
+
+    // Restore context after viewport transformations
+    function restoreViewport() {
+        ctx.restore();
+    }
+
+    // Convert screen coordinates to canvas coordinates
+    function screenToCanvas(x, y) {
+        return {
+            x: (x - viewportX) / viewportScale,
+            y: (y - viewportY) / viewportScale
+        };
+    }
+
+    // Zoom the viewport
+    function zoomViewport(factor, centerX, centerY) {
+        const oldScale = viewportScale;
+        viewportScale = Math.min(Math.max(viewportScale * factor, 0.1), 10);
+        
+        // Adjust viewport position to zoom toward the center point
+        if (centerX !== undefined && centerY !== undefined) {
+            const beforeX = (centerX - viewportX) / oldScale;
+            const beforeY = (centerY - viewportY) / oldScale;
+            const afterX = beforeX * viewportScale;
+            const afterY = beforeY * viewportScale;
+            viewportX -= (afterX - beforeX * oldScale);
+            viewportY -= (afterY - beforeY * oldScale);
+        }
+        
+        // Update zoom display
+        zoomDisplay.textContent = `${Math.round(viewportScale * 100)}%`;
+        
+        render();
+    }
+
+    // Fit content to view
+    function fitContentToView() {
+        if (objects.length === 0) {
+            resetViewport();
+            return;
+        }
+        
+        // Find bounds of all objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        objects.forEach(obj => {
+            const bounds = obj.getBounds();
+            minX = Math.min(minX, bounds.x);
+            minY = Math.min(minY, bounds.y);
+            maxX = Math.max(maxX, bounds.x + bounds.width);
+            maxY = Math.max(maxY, bounds.y + bounds.height);
+        });
+        
+        // Add padding
+        const padding = 50;
+        minX -= padding;
+        minY -= padding;
+        maxX += padding;
+        maxY += padding;
+        
+        // Calculate scale to fit
+        const contentWidth = maxX - minX;
+        const contentHeight = maxY - minY;
+        const scaleX = canvas.width / contentWidth;
+        const scaleY = canvas.height / contentHeight;
+        viewportScale = Math.min(scaleX, scaleY);
+        
+        // Center content
+        viewportX = canvas.width / 2 - (minX + contentWidth / 2) * viewportScale;
+        viewportY = canvas.height / 2 - (minY + contentHeight / 2) * viewportScale;
+        
+        // Update zoom display
+        zoomDisplay.textContent = `${Math.round(viewportScale * 100)}%`;
+        
+        render();
+    }
+
+    // Reset viewport to default
+    function resetViewport() {
+        viewportScale = 1;
+        viewportX = 0;
+        viewportY = 0;
+        zoomDisplay.textContent = '100%';
         render();
     }
 
@@ -356,6 +461,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function render() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
+        // Apply viewport transformations
+        applyViewportTransform();
+        
         // Draw all objects
         objects.forEach(obj => {
             obj.draw(ctx);
@@ -370,6 +478,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (selectedObject) {
             selectedObject.drawSelectionBox(ctx);
         }
+        
+        // Restore context
+        restoreViewport();
     }
     
     // Handle tool selection
@@ -408,8 +519,15 @@ document.addEventListener('DOMContentLoaded', () => {
     ellipseTool.addEventListener('click', () => selectActiveTool('ellipse'));
     
     // Keyboard shortcuts for tools
+    let isSpaceDown = false;
+    
     document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT') return; // Skip if typing in input fields
+        
+        if (e.code === 'Space') {
+            isSpaceDown = true;
+            canvas.style.cursor = 'grab';
+        }
         
         switch (e.key.toLowerCase()) {
             case 'v': selectActiveTool('select'); break;
@@ -430,6 +548,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
+    document.addEventListener('keyup', (e) => {
+        if (e.code === 'Space') {
+            isSpaceDown = false;
+            if (!isDraggingViewport) {
+                canvas.style.cursor = `cursor-${selectedTool}`;
+            }
+        }
+    });
+    
     // Find object under point
     function findObjectUnderPoint(x, y) {
         // Search in reverse order (top to bottom)
@@ -444,10 +571,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Get mouse coordinates relative to canvas
     function getMouseCoords(e) {
         const rect = canvas.getBoundingClientRect();
-        return {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        };
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        return screenToCanvas(screenX, screenY);
     }
     
     // Drawing functions based on selected tool
@@ -562,10 +688,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Mouse events
-    canvas.addEventListener('mousedown', startDrawing);
-    canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('mouseup', stopDrawing);
-    canvas.addEventListener('mouseleave', stopDrawing);
+    canvas.addEventListener('mousedown', (e) => {
+        // Middle mouse button or space+left click for panning
+        if (e.button === 1 || (isSpaceDown && e.button === 0)) {
+            e.preventDefault();
+            isDraggingViewport = true;
+            lastPanPoint = { x: e.clientX, y: e.clientY };
+            canvas.style.cursor = 'grabbing';
+        } else if (!isSpaceDown) {
+            startDrawing(e);
+        }
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+        if (isDraggingViewport) {
+            const dx = e.clientX - lastPanPoint.x;
+            const dy = e.clientY - lastPanPoint.y;
+            viewportX += dx;
+            viewportY += dy;
+            lastPanPoint = { x: e.clientX, y: e.clientY };
+            render();
+        } else if (!isSpaceDown) {
+            draw(e);
+        }
+    });
+    
+    canvas.addEventListener('mouseup', (e) => {
+        if (isDraggingViewport) {
+            isDraggingViewport = false;
+            canvas.style.cursor = isSpaceDown ? 'grab' : `cursor-${selectedTool}`;
+        } else if (!isSpaceDown) {
+            stopDrawing();
+        }
+    });
+    
+    canvas.addEventListener('mouseleave', (e) => {
+        if (isDraggingViewport) {
+            isDraggingViewport = false;
+            canvas.style.cursor = isSpaceDown ? 'grab' : `cursor-${selectedTool}`;
+        } else {
+            stopDrawing();
+        }
+    });
     
     // Touch events
     canvas.addEventListener('touchstart', (e) => {
@@ -591,6 +755,18 @@ document.addEventListener('DOMContentLoaded', () => {
     canvas.addEventListener('touchend', (e) => {
         e.preventDefault();
         stopDrawing();
+    });
+    
+    // Zoom with mouse wheel
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        zoomViewport(factor, mouseX, mouseY);
     });
     
     // Clear button
@@ -724,6 +900,13 @@ document.addEventListener('DOMContentLoaded', () => {
         URL.revokeObjectURL(svgUrl);
     });
     
-    // Initialize with path tool selected
+    // Zoom button controls
+    zoomInButton.addEventListener('click', () => zoomViewport(1.1, canvas.width/2, canvas.height/2));
+    zoomOutButton.addEventListener('click', () => zoomViewport(0.9, canvas.width/2, canvas.height/2));
+    zoomResetButton.addEventListener('click', resetViewport);
+    zoomFitButton.addEventListener('click', fitContentToView);
+    
+    // Initialize with path tool selected and reset viewport
     selectActiveTool('path');
+    resetViewport();
 });

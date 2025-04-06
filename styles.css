@@ -109,6 +109,14 @@ input[type="range"] {
     width: 40px;
 }
 
+#zoom-display {
+    font-size: 0.9rem;
+    color: #555;
+    width: 50px;
+    text-align: center;
+    font-weight: bold;
+}
+
 button {
     background-color: #4285f4;
     color: white;
@@ -165,3 +173,12 @@ canvas {
 .cursor-line { cursor: crosshair; }
 .cursor-rect { cursor: crosshair; }
 .cursor-ellipse { cursor: crosshair; }
+
+/* Cursor styles for panning */
+.cursor-grab {
+    cursor: grab;
+}
+
+.cursor-grabbing {
+    cursor: grabbing;
+}
